@@ -1,0 +1,14 @@
+{
+  "name": "product_catalog",
+  "columns": {
+    "product_id": {"type": "string", "required": true, "unique": true},
+    "name": {"type": "string", "required": true},
+    "category": {"type": "string", "required": true, "allowed_values": ["Hardware", "Electronics", "Software", "Consumables", "Accessories", "Services"]},
+    "unit_price": {"type": "float", "required": true, "min": 0.01},
+    "cost_price": {"type": "float", "required": true, "min": 0.0},
+    "supplier_id": {"type": "string", "required": true},
+    "stock_quantity": {"type": "integer", "required": true, "min": 0},
+    "weight_kg": {"type": "float", "required": true, "min": 0.0},
+    "is_active": {"type": "boolean", "required": true}
+  }
+}

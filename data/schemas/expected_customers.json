@@ -1,0 +1,12 @@
+{
+  "name": "customer_profiles",
+  "columns": {
+    "customer_id": {"type": "string", "required": true, "unique": true},
+    "name": {"type": "string", "required": true},
+    "email": {"type": "string", "required": true, "unique": true},
+    "tier": {"type": "string", "required": true, "allowed_values": ["bronze", "silver", "gold", "platinum"]},
+    "country": {"type": "string", "required": true},
+    "signup_date": {"type": "date", "required": true},
+    "lifetime_value": {"type": "float", "required": true, "min": 0.0}
+  }
+}
