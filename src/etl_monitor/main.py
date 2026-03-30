@@ -20,13 +20,16 @@ from .display.console import (
     console,
     print_agent_message,
     print_final_summary,
+    print_history_summary,
     print_incident_report,
     print_scenario_header,
     print_startup_banner,
 )
 from .pipeline.failures import SCENARIOS
+from .pipeline.history import HistoryStore
 from .pipeline.simulator import simulate_pipeline
 from .team.workflow import build_etl_team
+from .tools.history import make_history_tools
 
 ALL_SCENARIOS = [
     "healthy",
@@ -63,7 +66,7 @@ async def _stream_team(team, task_msg: str, state, agents_activated: list[str]) 
                 print_incident_report(state.incident_report)
 
 
-async def run_scenario(scenario_name: str) -> dict[str, Any]:
+async def run_scenario(scenario_name: str, store: HistoryStore) -> dict[str, Any]:
     scenario = SCENARIOS.get(scenario_name, SCENARIOS["healthy"])
     state = simulate_pipeline(scenario_name)
 
@@ -85,7 +88,7 @@ async def run_scenario(scenario_name: str) -> dict[str, Any]:
     max_retries = 5
     for attempt in range(max_retries):
         model_client = get_model_client()
-        team = build_etl_team(model_client, state)
+        team = build_etl_team(model_client, state, store)
         try:
             await _stream_team(team, task_msg, state, agents_activated)
             await model_client.close()
@@ -103,6 +106,11 @@ async def run_scenario(scenario_name: str) -> dict[str, Any]:
             else:
                 raise
 
+    # Persist run to history
+    history_tools = make_history_tools(state, store)
+    save_fn = next(t for t in history_tools if t.__name__ == "save_run_to_history")
+    save_fn()
+
     outcome = "HEALTHY"
     if state.remediation_applied:
         outcome = "UNRESOLVED" if state.has_failures else "RESOLVED"
@@ -119,6 +127,8 @@ async def run_scenario(scenario_name: str) -> dict[str, Any]:
 
 async def main() -> None:
     print_startup_banner()
+
+    store = HistoryStore()
 
     # Allow passing a single scenario name as CLI argument
     scenarios = sys.argv[1:] if len(sys.argv) > 1 else ALL_SCENARIOS
@@ -139,7 +149,7 @@ async def main() -> None:
             await asyncio.sleep(_SCENARIO_PAUSE)
 
         try:
-            result = await run_scenario(scenario_name)
+            result = await run_scenario(scenario_name, store)
             results.append(result)
         except Exception as exc:
             console.print(f"[bold red]ERROR in scenario '{scenario_name}': {exc}[/]")
@@ -150,6 +160,7 @@ async def main() -> None:
             })
 
     print_final_summary(results)
+    print_history_summary(store)
 
 
 if __name__ == "__main__":

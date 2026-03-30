@@ -14,6 +14,7 @@ _THEME = Theme({
     "agent.diagnostician": "bold yellow",
     "agent.remediation": "bold green",
     "agent.reporter": "bold magenta",
+    "agent.watchdog": "bold blue",
     "agent.tool": "dim white",
     "status.healthy": "bold green",
     "status.failed": "bold red",
@@ -28,6 +29,7 @@ _AGENT_STYLES: dict[str, str] = {
     "diagnostician_agent": "agent.diagnostician",
     "remediation_agent": "agent.remediation",
     "reporter_agent": "agent.reporter",
+    "watchdog_agent": "agent.watchdog",
 }
 
 _AGENT_LABELS: dict[str, str] = {
@@ -35,6 +37,7 @@ _AGENT_LABELS: dict[str, str] = {
     "diagnostician_agent": "Diagnostician",
     "remediation_agent": "Remediation",
     "reporter_agent": "Reporter",
+    "watchdog_agent": "Watchdog",
 }
 
 
@@ -103,6 +106,56 @@ def print_final_summary(results: list[dict]) -> None:
         console.print(
             f"  [{status_style}]{outcome:12s}[/]  {scenario:35s}  Agents: {agents_str}"
         )
+    console.print()
+
+
+def print_history_summary(store: "HistoryStore") -> None:  # type: ignore[name-defined]
+    """Print a trend summary from the run history store."""
+    from rich.table import Table
+
+    trend = store.get_failure_trend(window_hours=24)
+    records = store.get_recent(limit=20)
+
+    console.print()
+    console.print(Rule("[bold blue] Run History & Trends (last 24 h) [/]", style="bold blue"))
+    console.print(
+        f"  Total runs: [bold]{trend['total_runs']}[/]  |  "
+        f"Failed: [status.failed]{trend['failed_count']}[/]  |  "
+        f"Resolved: [status.healthy]{trend['resolved_count']}[/]  |  "
+        f"MTTR: [bold]{f\"{trend['mttr_seconds']:.0f}s\" if trend['mttr_seconds'] else 'N/A'}[/]"
+    )
+
+    if trend["recurrence_by_type"]:
+        console.print()
+        table = Table(title="Recurrence by Failure Type", show_header=True, header_style="bold")
+        table.add_column("Failure Type", style="cyan")
+        table.add_column("Count", justify="right")
+        for ft, count in sorted(trend["recurrence_by_type"].items(), key=lambda x: -x[1]):
+            table.add_row(ft, str(count))
+        console.print(table)
+
+    if records:
+        console.print()
+        table = Table(title="Recent Runs", show_header=True, header_style="bold")
+        table.add_column("Run ID", style="dim")
+        table.add_column("Scenario")
+        table.add_column("Failure Type")
+        table.add_column("Outcome")
+        table.add_column("Duration")
+        for r in records[-10:]:
+            outcome = r.get("outcome", "?")
+            style = {"HEALTHY": "status.healthy", "RESOLVED": "status.healthy",
+                     "FAILED": "status.failed", "UNRESOLVED": "status.failed"}.get(outcome, "white")
+            dur = r.get("duration_seconds")
+            dur_str = f"{dur:.1f}s" if dur is not None else "N/A"
+            table.add_row(
+                r.get("run_id", "?"),
+                r.get("scenario_name", "?"),
+                r.get("failure_type") or "none",
+                f"[{style}]{outcome}[/]",
+                dur_str,
+            )
+        console.print(table)
     console.print()
 
 

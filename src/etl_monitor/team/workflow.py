@@ -10,32 +10,44 @@ from ..agents.diagnostician import make_diagnostician_agent
 from ..agents.monitor import make_monitor_agent
 from ..agents.remediation import make_remediation_agent
 from ..agents.reporter import make_reporter_agent
+from ..agents.watchdog import make_watchdog_agent
+from ..pipeline.history import HistoryStore
 from ..pipeline.state import PipelineState
 
 
-def build_etl_team(model_client: ChatCompletionClient, state: PipelineState) -> GraphFlow:
+def build_etl_team(
+    model_client: ChatCompletionClient,
+    state: PipelineState,
+    store: HistoryStore,
+) -> GraphFlow:
     """
-    Assemble the 4-agent ETL monitoring team as a conditional DAG GraphFlow.
+    Assemble the 5-agent ETL monitoring team as a conditional DAG GraphFlow.
 
     Graph structure:
-        Monitor ──(ISSUES_DETECTED)──► Diagnostician ──► Remediation ──► Reporter
-        Monitor ──(NO_ISSUES_DETECTED)──────────────────────────────────► Reporter
+        Watchdog ──(WATCHDOG_KNOWN_FAILURE)──────────────────────► Remediation ──► Reporter
+        Watchdog ──(WATCHDOG_NEW_FAILURE)──► Monitor ──(PIPELINE_FAIL)──► Diagnostician ──► Remediation
+                                             Monitor ──(PIPELINE_OK)─────────────────────────────────► Reporter
     """
+    watchdog = make_watchdog_agent(model_client, state, store)
     monitor = make_monitor_agent(model_client, state)
     diagnostician = make_diagnostician_agent(model_client, state)
     remediation = make_remediation_agent(model_client, state)
     reporter = make_reporter_agent(model_client, state)
 
     builder = DiGraphBuilder()
+    builder.add_node(watchdog)
     builder.add_node(monitor)
     builder.add_node(diagnostician)
     builder.add_node(remediation)
     builder.add_node(reporter)
 
-    # String conditions — GraphFlow checks if substring appears in the message
+    # Watchdog routes: known recurring failure → skip straight to Remediation
+    builder.add_edge(watchdog, remediation, condition="WATCHDOG_KNOWN_FAILURE")
+    # Watchdog routes: new/rare failure → normal Monitor flow
+    builder.add_edge(watchdog, monitor, condition="WATCHDOG_NEW_FAILURE")
+
+    # Monitor routes
     builder.add_edge(monitor, diagnostician, condition="PIPELINE_FAIL")
-    # Both paths leading to Reporter use the same activation_group with "any" condition,
-    # so Reporter fires when EITHER Monitor (healthy) OR Remediation (issue path) completes.
     builder.add_edge(
         monitor, reporter,
         condition="PIPELINE_OK",
@@ -43,7 +55,7 @@ def build_etl_team(model_client: ChatCompletionClient, state: PipelineState) -> 
         activation_condition="any",
     )
 
-    # Unconditional edges through the issue path
+    # Issue path: Diagnostician → Remediation → Reporter
     builder.add_edge(diagnostician, remediation)
     builder.add_edge(
         remediation, reporter,
@@ -51,7 +63,7 @@ def build_etl_team(model_client: ChatCompletionClient, state: PipelineState) -> 
         activation_condition="any",
     )
 
-    builder.set_entry_point(monitor)
+    builder.set_entry_point(watchdog)
 
     termination = TextMentionTermination("TERMINATE") | MaxMessageTermination(100)
 
